@@ -1,0 +1,163 @@
+name: Build DTT Native Integrity Agent
+
+# Builds dtt_agent for Windows/Linux/macOS x64+arm64 on every push/PR that
+# touches the native agent, plus on demand. Uploads each binary as a build
+# artifact; also attaches them to a GitHub Release when you push a tag
+# like "native-v1.0.0".
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'dtt_native_agent/**'
+      - '.github/workflows/build-native-agent.yml'
+    tags:
+      - 'native-v*'
+  pull_request:
+    paths:
+      - 'dtt_native_agent/**'
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            arch: x64
+            output_name: dtt_agent-win-x64.dll
+            build_path: build/Release/dtt_agent.dll
+            cmake_extra: ""
+
+          - name: windows-arm64
+            os: windows-11-arm
+            arch: arm64
+            output_name: dtt_agent-win-arm64.dll
+            build_path: build/Release/dtt_agent.dll
+            cmake_extra: ""
+
+          - name: linux-x64
+            os: ubuntu-latest
+            arch: x64
+            output_name: libdtt_agent-linux-x64.so
+            build_path: build/libdtt_agent.so
+            cmake_extra: ""
+
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            arch: arm64
+            output_name: libdtt_agent-linux-arm64.so
+            build_path: build/libdtt_agent.so
+            cmake_extra: ""
+
+          - name: macos-x64
+            os: macos-13
+            arch: x64
+            output_name: libdtt_agent-macos-x64.dylib
+            build_path: build/libdtt_agent.dylib
+            cmake_extra: "-DCMAKE_OSX_ARCHITECTURES=x86_64"
+
+          - name: macos-arm64
+            os: macos-14
+            arch: arm64
+            output_name: libdtt_agent-macos-arm64.dylib
+            build_path: build/libdtt_agent.dylib
+            cmake_extra: "-DCMAKE_OSX_ARCHITECTURES=arm64"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Any JDK 8+ works - we only need jni.h/jvmti.h headers, nothing
+      # about this build depends on a specific Java version.
+      - name: Set up JDK (${{ matrix.arch }})
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          architecture: ${{ matrix.arch == 'arm64' && 'aarch64' || 'x64' }}
+
+      - name: Configure (CMake)
+        run: |
+          cmake -S dtt_native_agent -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_extra }}
+        shell: bash
+
+      - name: Build
+        run: cmake --build build --config Release
+        shell: bash
+
+      - name: Rename output to platform-specific name
+        run: |
+          mkdir -p out
+          cp "${{ matrix.build_path }}" "out/${{ matrix.output_name }}"
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.output_name }}
+          path: out/${{ matrix.output_name }}
+          if-no-files-found: error
+
+  # Optional: combine the two macOS binaries into a single universal
+  # .dylib so you can ship 5 files instead of 6. Only runs on macOS since
+  # `lipo` is an Apple-only tool.
+  macos-universal:
+    name: macos-universal (lipo)
+    needs: build
+    runs-on: macos-14
+    steps:
+      - name: Download macOS x64 build
+        uses: actions/download-artifact@v4
+        with:
+          name: libdtt_agent-macos-x64.dylib
+          path: x64
+
+      - name: Download macOS arm64 build
+        uses: actions/download-artifact@v4
+        with:
+          name: libdtt_agent-macos-arm64.dylib
+          path: arm64
+
+      - name: Merge with lipo
+        run: |
+          mkdir -p out
+          lipo -create \
+            x64/libdtt_agent-macos-x64.dylib \
+            arm64/libdtt_agent-macos-arm64.dylib \
+            -output out/libdtt_agent-macos-universal.dylib
+          lipo -info out/libdtt_agent-macos-universal.dylib
+
+      - name: Upload universal artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libdtt_agent-macos-universal.dylib
+          path: out/libdtt_agent-macos-universal.dylib
+
+  # On a tag push (native-v1.0.0 etc.) collect every artifact and attach
+  # them to a GitHub Release automatically.
+  release:
+    name: Attach binaries to release
+    if: startsWith(github.ref, 'refs/tags/native-v')
+    needs: [ build, macos-universal ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifact folders
+        run: |
+          mkdir -p release
+          find artifacts -type f -exec cp {} release/ \;
+          ls -la release
+
+      - name: Create/Update Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
