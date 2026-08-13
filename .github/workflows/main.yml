@@ -77,9 +77,12 @@ jobs:
 
           # ---------------------------------------------------------
           # macOS x64 / Intel
+          #
+          # macos-13 is retired.
+          # macos-15-intel is the current Intel hosted runner.
           # ---------------------------------------------------------
           - name: macos-x64
-            os: macos-13
+            os: macos-15-intel
             arch: x64
             java_arch: x64
             output_name: libdtt_agent-macos-x64.dylib
@@ -88,9 +91,11 @@ jobs:
 
           # ---------------------------------------------------------
           # macOS ARM64 / Apple Silicon
+          #
+          # macos-15 is the current ARM64 standard runner.
           # ---------------------------------------------------------
           - name: macos-arm64
-            os: macos-14
+            os: macos-15
             arch: arm64
             java_arch: aarch64
             output_name: libdtt_agent-macos-arm64.dylib
