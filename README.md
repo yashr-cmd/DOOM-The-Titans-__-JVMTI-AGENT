@@ -1,4 +1,4 @@
-DTT Native Integrity Agent (dtt_agent)
+##DTT Native Integrity Agent (dtt_agent)
 
 A pure-C JVMTI native agent that protects the DOOM The Titans mod and its companion Java runtime agent from in-process tampering by hostile mods.
 
